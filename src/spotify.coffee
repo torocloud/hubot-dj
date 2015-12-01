@@ -13,7 +13,6 @@ shell   = require 'sh'
 qs      = require 'querystring'
 
 config =
-  # auth_endpoint: 'https://damoocow.herokuapp.com/spotify/login'
   auth_endpoint: 'http://uikit.dev/spotify/login'
   spotify:
     baseurl: 'https://api.spotify.com/v1/'
@@ -28,7 +27,7 @@ config =
       'playlist-read-collaborative'
     ].join ' '
   redis:
-    url: 'redis://127.0.0.1:16379/'
+    url: process.env.BOXEN_REDIS_URL
 
 module.exports = (robot) ->
   # Event Listener to trigger Spotify Stuff
@@ -36,15 +35,6 @@ module.exports = (robot) ->
 
   # Initialize Redis Client to Store Spotify Authentication Stuff
   spotify_redis = redis.createClient config.redis.url
-
-  spotify_headers = (callback) ->
-    spotify_redis.get 'hubot:spotify_auth', (err, content) ->
-      content = JSON.parse content
-      headers =
-        "Authorization": "Bearer #{content.access_token}"
-        "Content-Type": "application/json"
-        "User-Agent": "@batibot via npm request"
-      callback and callback(headers)
 
   # Hubot Respawned
   enter = [
@@ -64,17 +54,21 @@ module.exports = (robot) ->
 
   # Authenticate Spotify
   spotify_auth = (opts) ->
-    request.get config.auth_endpoint, {
-      qs: qs.stringify {
-        client_id: config.spotify.client_id,
-        client_secret: config.spotify.client_secret
-      }
-    }, (err, res, body) ->
-      spotify_redis.set 'hubot:spotify_auth', body
-      spotify_redis.end()
-
-      spotify_event.removeListener 'hubot up', spotify_auth
+    request.get config.auth_endpoint, (err, response, body) ->
+      body = JSON.parse body
+      spotify_redis.set 'hubot:spotify_auth', JSON.stringify body
       opts.msg.send "Spotify is authenticated, Waiting for your requests."
+      spotify_event.removeListener 'hubot up', spotify_auth
+
+  # Requests Headers to Spotify
+  spotify_headers = (callback) ->
+    spotify_redis.get 'hubot:spotify_auth', (err, content) ->
+      auth = if typeof content == 'object' then content else JSON.parse(content)
+      headers =
+        "Authorization": "Bearer #{auth.access_token}"
+        "Content-Type": "application/json"
+        "User-Agent": "@batibot via npm request"
+      callback and callback(headers)
 
   # Spotify Search Listener
   spotify_search = (opts) ->
@@ -94,7 +88,7 @@ module.exports = (robot) ->
         song = if body.hasOwnProperty('tracks') then body.tracks.items[0] else null
         if song
           opts.msg.reply "I found #{song.external_urls.spotify}"
-          opts.msg.send "/code \# To add this song to the Playlist: \n\n\> @#{opts.robot.name} spotify playlist add #{song.uri}"
+          opts.msg.send "/code \# To add this song to the Playlist: \n\n\> @#{opts.robot.name} spotify playlist: add #{song.uri}"
         else
           opts.msg.send "/code Woops, we hit Status #{body.error.status} \n #{body.error.message}. Reloading Authentication to Spotify."
           spotify_event.on 'hubot up', spotify_auth
@@ -102,29 +96,25 @@ module.exports = (robot) ->
             msg: msg
             robot: robot
         spotify_event.removeListener 'search', spotify_search
-        spotify_redis.end()
 
   # Spotify Playlist Listener
   spotify_playlist = (opts) ->
+    song = opts.query.trim()
     req_opts =
       url:"#{config.spotify.baseurl}users/#{config.spotify.user_id}/playlists/#{config.spotify.playlist}/tracks"
       qs:
-        uris: "#{opts.query.trim()}"
-
+        uris: song
     spotify_headers (headers) ->
       req_opts.headers = headers
       request.post req_opts, (err, res, body) ->
-        console.log res
         body  = JSON.parse body
         queue = if body.hasOwnProperty('snapshot_id') then body else null
-
         if queue
           opts.msg.send "#{opts.query} has been added to #{config.spotify.playlist}"
         else
           opts.msg.send "Either the track is invalid or does not exists. Sorry."
 
         spotify_event.removeListener 'add-playlist', spotify_playlist
-        spotify_redis.end()
 
   ##
   # @name Search Spotify
@@ -137,12 +127,19 @@ module.exports = (robot) ->
       robot: robot
 
   ##
+  # @name Help
+  # @desc Commands for your Bot
+  #
+  robot.respond /spotify-help/i, (msg) ->
+    msg.send "/code \# Spotify Commands for @#{robot.name}\n@#{robot.name} spotify <playlist|search> [add|track] [song_title - artist | spotify:track:uri]\n\n Example:\n   @#{robot.name} spotify search track: Wake Up - Coheed and Cambria \n   @#{robot.name} spotify playlist add: spotify:track:2tUhCTpGeEfssyYTeu0chm\n \n"
+    msg.send "Playlist is static at the moment, If you'd like to contribute and improve just fork: https://github.com/toro-io/hubot-dj"
+  ##
   # @name Spotify Commands
   # @keyword: spotify
   # @param: <playlist:search>
   # @actions: <add|remove|track|song>
   #
-  robot.respond /spotify\s?(playlist|search)\:\s*?(add|remove|track|song)\s*?(.*)$/i, (msg) ->
+  robot.respond /spotify\s?(playlist|search)\s*?(add|remove|track|song)\:\s*?(.*)$/i, (msg) ->
     search = (action, message, robot) ->
       spotify_event.on 'search', spotify_search
       spotify_event.emit 'search',
