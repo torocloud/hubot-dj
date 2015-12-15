@@ -20,6 +20,7 @@
     "querystring": "^0.2.0",
     "redis": "^2.4.2",
     "request": "^2.67.0",
-    "sh": "0.0.3"
+    "sh": "0.0.3",
+    "spotify-web-api-node": "^2.2.0"
   }
 }

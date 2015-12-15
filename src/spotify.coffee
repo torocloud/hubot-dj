@@ -1,9 +1,3 @@
-## Spotify Queue
-# Authored by Pongstr Ordillo
-#   - https://github.com/pongstr
-#   - https://github.com/toro-io/hubot-dj
-#
-
 {join} = require 'path'
 events = require 'events'
 
@@ -12,6 +6,7 @@ redis   = require 'redis'
 shell   = require 'sh'
 qs      = require 'querystring'
 
+
 config =
   auth_endpoint: 'http://uikit.dev/spotify/login'
   spotify:
@@ -19,7 +14,7 @@ config =
     user_id: process.env.SPOTIFY_USER_ID
     client_id: process.env.SPOTIFY_CLIENT_ID
     client_secret: process.env.SPOTIFY_CLIENT_SECRET
-    playlist: '18LoVT3QhcJY1AHVGay9uA'
+    playlist: process.env.SPOTIFY_PLAYLIST_ID
     scope: [
       'user-follow-read'
       'user-library-read'
@@ -41,7 +36,8 @@ module.exports = (robot) ->
     "What's up humanoids?! I've respawned, Let's take over the world.",
     "I'm your genie for today, you have three wishes I can fulfill.. Actually, just type in a command.",
     "Is anybody up? Let's brew some coffee.",
-    "I'm built with CoffeeScript and Shell, I'm made for parties."
+    "I'm built with CoffeeScript and Shell, I'm made for parties.",
+    "You do know I don't like Justin Bieber right? Just so we're clear."
   ]
 
   # Hubot Night Mode
@@ -51,12 +47,18 @@ module.exports = (robot) ->
     "Had chinese food last night, I need to quickly poop my guts out. See you in a bit."
   ]
 
+  # Bieber
+  bieber = [
+    "http://i0.kym-cdn.com/entries/icons/original/000/007/423/untitle.JPG",
+    "http://treasure.diylol.com/uploads/post/image/527849/resized_jesus-says-meme-generator-fuck-justin-bieber-i-listen-to-satanic-black-metal-888457.jpg",
+    "http://cf.chucklesnetwork.agj.co/items/7/7/7/3/5/yo-dawg-i-heard-you-liek-justin-bieber-so-we-killed-you.jpg",
+    "http://cdn2-b.examiner.com/sites/default/files/styles/image_content_width/hash/fb/76/fb76431b8c2ba99a5997d47f095a068e.jpg?itok=z7nrvYot",
+    "http://www.missceleb.com/wp-content/uploads/2014/07/justin-bieber-nicki-minaj-anaconda-meme.jpg"
+  ]
 
   # Authenticate Spotify
   spotify_auth = (opts) ->
     request.get config.auth_endpoint, (err, response, body) ->
-      body = JSON.parse body
-      spotify_redis.set 'hubot:spotify_auth', JSON.stringify body
       opts.msg.send "Spotify is authenticated, Waiting for your requests."
       spotify_event.removeListener 'hubot up', spotify_auth
 
@@ -72,30 +74,49 @@ module.exports = (robot) ->
 
   # Spotify Search Listener
   spotify_search = (opts) ->
-    req_opts =
-      url: "#{config.spotify.baseurl}search"
-      qs:
-        q: "#{opts.query}"
-        type: "track,artist"
-        limit: 1
-        offset: 0
-        market: 'PH'
+    ban = [
+      'bieber'
+      'justin bieber'
+      'april boy'
+      'regino'
+    ]
 
-    spotify_headers (headers) ->
-      req_opts.headers = headers
-      request.get req_opts, (err, res, body) ->
-        body = JSON.parse body
-        song = if body.hasOwnProperty('tracks') then body.tracks.items[0] else null
-        if song
-          opts.msg.reply "I found #{song.external_urls.spotify}"
-          opts.msg.send "/code \# To add this song to the Playlist: \n\n\> @#{opts.robot.name} spotify playlist: add #{song.uri}"
-        else
-          opts.msg.send "/code Woops, we hit Status #{body.error.status} \n #{body.error.message}. Reloading Authentication to Spotify."
-          spotify_event.on 'hubot up', spotify_auth
-          spotify_event.emit 'hubot up',
-            msg: msg
-            robot: robot
-        spotify_event.removeListener 'search', spotify_search
+    filter = (str) ->
+      store = 0
+      ban.forEach (e, i, a) ->
+        str.toLowerCase().match(e) and store++
+        return
+      store
+
+    if filter(opts.query) == 0
+      req_opts =
+        url: "#{config.spotify.baseurl}search"
+        qs:
+          q: "#{opts.query}"
+          type: "track,artist"
+          limit: 1
+          offset: 0
+          market: 'PH'
+
+      spotify_headers (headers) ->
+        req_opts.headers = headers
+        request.get req_opts, (err, res, body) ->
+          body = JSON.parse body
+          song = if body.hasOwnProperty('tracks') then body.tracks.items[0] else null
+          if song
+            opts.msg.reply "I found #{song.external_urls.spotify}"
+            opts.msg.send "/code \# To add this song to the Playlist: \n\n\> @#{opts.robot.name} spotify playlist add: #{song.uri}"
+          else
+            opts.msg.send "/code Woops, we hit Status #{body.error.status} \n #{body.error.message}. Reloading Authentication to Spotify."
+            spotify_event.on 'hubot up', spotify_auth
+            spotify_event.emit 'hubot up',
+              msg: msg
+              robot: robot
+          spotify_event.removeListener 'search', spotify_search
+      spotify_event.removeListener 'search', spotify_search
+    else
+      opts.msg.send opts.msg.random bieber
+      spotify_event.removeListener 'search', spotify_search
 
   # Spotify Playlist Listener
   spotify_playlist = (opts) ->
@@ -115,6 +136,12 @@ module.exports = (robot) ->
           opts.msg.send "Either the track is invalid or does not exists. Sorry."
 
         spotify_event.removeListener 'add-playlist', spotify_playlist
+
+  robot.enter (res) ->
+    res.send res.random enter
+
+  robot.leave (res) ->
+    res.send res.random leave
 
   ##
   # @name Search Spotify
