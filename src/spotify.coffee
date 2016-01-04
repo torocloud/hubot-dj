@@ -79,6 +79,7 @@ module.exports = (robot) ->
       'justin bieber'
       'april boy'
       'regino'
+      'renz verano'
     ]
 
     filter = (str) ->
@@ -130,10 +131,12 @@ module.exports = (robot) ->
       request.post req_opts, (err, res, body) ->
         body  = JSON.parse body
         queue = if body.hasOwnProperty('snapshot_id') then body else null
+
         if queue
           opts.msg.send "#{opts.query} has been added to #{config.spotify.playlist}"
         else
-          opts.msg.send "Either the track is invalid or does not exists. Sorry."
+          console.log body
+          opts.msg.send "Spotify says #{body.error.status}, #{body.error.message}\nEither the track is invalid or does not exists. Sorry."
 
         spotify_event.removeListener 'add-playlist', spotify_playlist
 
