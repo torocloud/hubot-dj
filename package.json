@@ -1,6 +1,6 @@
 {
   "name": "hubot-dj",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A hubot dj that queues all your requests. Can play songs from iTunes or Spotify. Yeah.",
   "main": "index.coffee",
   "scripts": {
