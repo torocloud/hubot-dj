@@ -79,7 +79,8 @@ module.exports = (robot) ->
       'justin bieber'
       'april boy'
       'regino'
-      'renz verano'
+      'renz verano',
+      'secondhand serenade'
     ]
 
     filter = (str) ->
