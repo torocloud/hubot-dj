@@ -1,68 +1,76 @@
-# Description:
-#   Disc Jock bot that lets you queue your requested songs from Spotify
-#
-# Dependencies:
-#
-#
-# Configuration:
-#   export SPOTIFY_USER_ID=${YOUR_SPOTIFY_USER_ID}
-#   export SPOTIFY_CLIENT_ID=${YOUR_SPOTIFY_CLIENT_ID}
-#   export SPOTIFY_CLIENT_SECRET=${YOUR_SPOTIFY_CLIENT_SECRET}
-#   export SPOTIFY_PLAYLIST_ID=${YOUR_SPOTIFY_PLAYLIST_ID}
-#
 
-{join} = require 'path'
-events = require 'events'
 
-request = require 'request'
-redis   = require 'redis'
-shell   = require 'sh'
-qs      = require 'querystring'
 
+
+
+{join}      = require 'path'
+events      = require 'events'
+nunjucks    = require 'nunjucks'
+request     = require 'request'
+redis       = require 'redis'
+shell       = require 'sh'
+qs          = require 'querystring'
+SpotifyAPI  = require 'spotify-web-api-node'
+
+filepath = "#{join process.cwd(), 'node_modules/hubot-dj/views'}"
+template = new nunjucks.Environment(new nunjucks.FileSystemLoader(filepath))
 
 config =
-  auth_endpoint: 'http://uikit.dev/spotify/login'
-  spotify:
-    baseurl: 'https://api.spotify.com/v1/'
-    user_id: process.env.SPOTIFY_USER_ID
-    client_id: process.env.SPOTIFY_CLIENT_ID
-    client_secret: process.env.SPOTIFY_CLIENT_SECRET
-    playlist: process.env.SPOTIFY_PLAYLIST_ID
-    scope: [
-      'user-follow-read'
-      'user-library-read'
-      'playlist-modify-public'
-      'playlist-read-collaborative'
-    ].join ' '
-  redis:
-    url: process.env.BOXEN_REDIS_URL
+  clientId: 'af83782185e14a2e9195f9aca2e1cd70'
+  clientSecret: '9dc596e6f4e34b1ba5b22ca30c6f3961'
+  redirectUri: 'http://127.0.0.1:8080/spotify/callback'
+
+scopes = [
+  'user-follow-read'
+  'user-library-read'
+  'playlist-modify-public'
+  'playlist-read-collaborative'
+]
 
 module.exports = (robot) ->
-  # Event Listener to trigger Spotify Stuff
-  spotify_event = new (events.EventEmitter)
+  regx = /\/batibot\s(search|playlist|help)?(\strack:\s|\sadd:\s)?(\"?.*?\"?\s?(--add|-a|--remove|-rm)?)?$/i
 
-  # Initialize Redis Client to Store Spotify Authentication Stuff
-  spotify_redis = redis.createClient config.redis.url
+  # Utilities
+  util =
+    filter: (arr, str) ->
+      store = 0
+      arr.forEach (e, i, a) ->
+        str.toLowerCase().match(e) and store++
+      return store
+    comparator: (subject, switchOne, switchTwo) ->
+      if subject == switchOne or subject == switchTwo
+        return true
+      else
+        return false
 
   # Hubot Respawned
   enter = [
     "What's up humanoids?! I've respawned, Let's take over the world.",
-    "I'm your genie for today, you have three wishes I can fulfill.. Actually, just type in a command.",
+    "I'm your genie for today, you have three wishes I can fulfill.. Actually,
+    just type in a command.",
     "Is anybody up? Let's brew some coffee.",
     "I'm built with CoffeeScript and Shell, I'm made for parties.",
     "You do know I don't like Justin Bieber right? Just so we're clear."
     "Holy shit! It's nice to wake up from a shitty slumber.",
-    "I'm rising from the murks of the sultry abyss. Let's get this show started."
+    "I'm rising from the murks of the sultry abyss.
+    Let's get this show started."
   ]
 
   # Hubot Night Mode
   leave = [
-    "I need to relieve myself in the bathroom to reboot my awesomeness. Peace out!",
+    "I need to relieve myself in the bathroom to reboot my awesomeness.
+    Peace out!",
     "Rebooting to get my shit together, that was some party last night.",
-    "Had chinese food last night, I need to quickly poop my guts out. See you in a bit."
+    "Had chinese food last night, I need to quickly poop my guts out.
+    See you in a bit."
   ]
 
-  # Bieber
+  ###
+  # @name Fuck Bieber, fuck bieber man..
+  # @desc Bot responds with these images whenever a user searches
+  #       for Justin Bieber. He makes good music, fine, but we don't want
+  #       to hear it. Thank you. Fuck Bieber man.
+  ###
   bieber = [
     "http://i0.kym-cdn.com/entries/icons/original/000/007/423/untitle.JPG",
     "http://treasure.diylol.com/uploads/post/image/527849/resized_jesus-says-meme-generator-fuck-justin-bieber-i-listen-to-satanic-black-metal-888457.jpg",
@@ -71,148 +79,156 @@ module.exports = (robot) ->
     "http://www.missceleb.com/wp-content/uploads/2014/07/justin-bieber-nicki-minaj-anaconda-meme.jpg"
   ]
 
-  # Authenticate Spotify
-  spotify_auth = (opts) ->
-    request.get config.auth_endpoint, (err, response, body) ->
-      opts.msg.send "Spotify is authenticated, Waiting for your requests."
-      spotify_event.removeListener 'hubot up', spotify_auth
+  ###
+  # @name ban array
+  # @desc lists of artists to ban to stop fuckers from trolling the playlist
+  ###
+  ban = [
+    'bieber'
+    'justin bieber'
+    'april boy'
+    'regino'
+    'renz verano'
+    'secondhand serenade'
+  ]
 
-  # Requests Headers to Spotify
-  spotify_headers = (callback) ->
-    spotify_redis.get 'hubot:spotify_auth', (err, content) ->
-      auth = if typeof content == 'object' then content else JSON.parse(content)
-      headers =
-        "Authorization": "Bearer #{auth.access_token}"
-        "Content-Type": "application/json"
-        "User-Agent": "@batibot via npm request"
-      callback and callback(headers)
 
-  # Spotify Search Listener
-  spotify_search = (opts) ->
-    ban = [
-      'bieber'
-      'justin bieber'
-      'april boy'
-      'regino'
-      'renz verano',
-      'secondhand serenade'
-    ]
+  # Initialize Spotify API
+  spotify = new SpotifyAPI(config)
+  authHeader = new Buffer("#{config.clientId}:#{config.clientSecret}")
 
-    filter = (str) ->
-      store = 0
-      ban.forEach (e, i, a) ->
-        str.toLowerCase().match(e) and store++
+  ###
+  # @name authenticate
+  # @desc you know, authentication stuff.
+  ###
+  authenticate = (req, res, next) ->
+    spotify.authorizationCodeGrant(req.query.code)
+      .then ((data) ->
+        # Attach Spotify Access and Refresh Tokens to the constructor
+        spotify.setAccessToken data.body.access_token
+        spotify.setRefreshToken data.body.refresh_token
+
+        # Save it to Batibot's brain just in case he crashes and
+        # burns and fall into the sultry abyss again.
+        robot.brain.set 'spotify', data.body
+
+        # Tell batibot to stop listening for this event now
+        robot.removeListener 'authenticate', authenticate
+
+        # Then let's proceed
+        next()
+      ), (err) ->
+        robot.removeListener 'authenticate', authenticate
+        res.status 400
+        res.send template.render 'index.html', error: err
         return
-      store
 
-    if filter(opts.query) == 0
-      req_opts =
-        url: "#{config.spotify.baseurl}search"
-        qs:
-          q: "#{opts.query}"
-          type: "track,artist"
-          limit: 1
-          offset: 0
-          market: 'PH'
+  ###
+  # @name refresh token
+  # @desc auto-refresh access token whenever it expires
+  ###
+  refreshToken = (callback) ->
+    spotify.refreshAccessToken().then ((data) ->
+      # Re-attach the newly refreshed Spotify Access and
+      # Refresh Tokens to the constructor.
+      spotify.setAccessToken(data.body.access_token)
+      spotify.setRefreshToken(data.body.refresh_token)
 
-      spotify_headers (headers) ->
-        req_opts.headers = headers
-        request.get req_opts, (err, res, body) ->
-          body = JSON.parse body
-          song = if body.hasOwnProperty('tracks') then body.tracks.items[0] else null
-          if song
-            opts.msg.reply "I found #{song.external_urls.spotify}"
-            opts.msg.send "/code \# To add this song to the Playlist: \n\n\> @#{opts.robot.name} spotify playlist add: #{song.uri}"
-          else
-            opts.msg.send "/code Woops, we hit Status #{body.error.status} \n #{body.error.message}. Reloading Authentication to Spotify."
-            spotify_event.on 'hubot up', spotify_auth
-            spotify_event.emit 'hubot up',
-              msg: msg
-              robot: robot
-          spotify_event.removeListener 'search', spotify_search
-      spotify_event.removeListener 'search', spotify_search
+      # Re-save it to Batibot's brain just in case he crashes and
+      # burns and fall into the sultry abyss again.
+      robot.brain.set 'spotify', data.body
+
+      # Callback for optimum awesome, returns auth object
+      callback and callback(data)
+      return
+    ), (err) ->
+      refreshToken(callback)
+      return
+
+
+  ###
+  # @name Spotify Search
+  # @desc Function that searches spotify for your favorite tracks
+  ###
+  search = (opts) ->
+    console.log opts
+    return
+
+  ###
+  # @name PLayList
+  # @desc Function to perform CRUD operations to Playlist
+  ###
+  playlist = (opts) ->
+    console.log opts
+    return
+
+  # Event Listenersm they go here
+  # -----------------------------
+
+  # Listening for Authentication
+  robot.on 'authenticate', authenticate
+
+  # Listening for Search Events
+  robot.on 'search', search
+
+  # Listening for Playlist Events
+  robot.on 'playlist', playlist
+
+  # Routes, they go here
+  # --------------------
+
+
+  ###
+  # @name spotify login
+  # @desc a login route where playlist admin get started with all the shiz.
+  ###
+  robot.router.get '/spotify/login', (req, res) ->
+    authorize = spotify.createAuthorizeURL scopes, require('node-uuid').v4()
+    res.send template.render 'index.html', {authorize: authorize}
+    res.end()
+
+  ###
+  # @name spotify callback
+  # @desc is a callback route where spotify returns oauth code and all that
+  #       shiz for batibot to post back to spotify in order for us to acquire
+  #       authentication tokens and stuff... yazz.
+  ###
+  robot.router.get '/spotify/callback', ((req, res, next) ->
+    robot.emit 'authenticate', req, res, next
+    return
+  ), (req, res) ->
+    res.redirect '/spotify'
+    res.end()
+    return
+
+  ###
+  # @name spotify playlist admin
+  # @desc a single page app the displays playlist admin options.
+  ###
+  robot.router.get '/spotify', ((req, res, next) ->
+    credentials = robot.brain.get('spotify')
+    if credentials
+      res.send template.render 'admin.html', {credentials: credentials}
+      res.end()
     else
-      opts.msg.send opts.msg.random bieber
-      spotify_event.removeListener 'search', spotify_search
+      next()
 
-  # Spotify Playlist Listener
-  spotify_playlist = (opts) ->
-    song = opts.query.trim()
-    req_opts =
-      url:"#{config.spotify.baseurl}users/#{config.spotify.user_id}/playlists/#{config.spotify.playlist}/tracks"
-      qs:
-        uris: song
-    spotify_headers (headers) ->
-      req_opts.headers = headers
-      request.post req_opts, (err, res, body) ->
-        body  = JSON.parse body
-        queue = if body.hasOwnProperty('snapshot_id') then body else null
+  ), (req, res) ->
+    res.redirect '/spotify/login'
+    res.end()
+    return
 
-        if queue
-          opts.msg.send "#{opts.query} has been added to #{config.spotify.playlist}"
-        else
-          console.log body
-          opts.msg.send "Spotify says #{body.error.status}, #{body.error.message}\nEither the track is invalid or does not exists. Sorry."
-
-        spotify_event.removeListener 'add-playlist', spotify_playlist
-
-  robot.enter (res) ->
-    res.send res.random enter
-
-  robot.leave (res) ->
-    res.send res.random leave
-
-  ##
-  # @name Search Spotify
-  # @desc listener function for searching songs
-  #
-  robot.respond /spotify-login/i, (msg) ->
-    spotify_event.on 'hubot up', spotify_auth
-    spotify_event.emit 'hubot up',
-      msg: msg
-      robot: robot
-
-  ##
-  # @name Help
-  # @desc Commands for your Bot
-  #
-  robot.respond /spotify-help/i, (msg) ->
-    msg.send "/code \# Spotify Commands for @#{robot.name}\n@#{robot.name} spotify <playlist|search> [add|track] [song_title - artist | spotify:track:uri]\n\n Example:\n   @#{robot.name} spotify search track: Wake Up - Coheed and Cambria \n   @#{robot.name} spotify playlist add: spotify:track:2tUhCTpGeEfssyYTeu0chm\n \n"
-    msg.send "Playlist is static at the moment, If you'd like to contribute and improve just fork: https://github.com/toro-io/hubot-dj"
-  ##
-  # @name Spotify Commands
-  # @keyword: spotify
-  # @param: <playlist:search>
-  # @actions: <add|remove|track|song>
-  #
-  robot.respond /spotify\s?(playlist|search)\s*?(add|remove|track|song)\:\s*?(.*)$/i, (msg) ->
-    search = (action, message, robot) ->
-      spotify_event.on 'search', spotify_search
-      spotify_event.emit 'search',
-        msg: message
-        query: action.query
-        robot: robot
-
-    playlist = (action, message, robot) ->
-      message.reply "You asked to #{action.exec} #{action.query} to #{action.keyword}"
-      spotify_event.on 'add-playlist', spotify_playlist
-      spotify_event.emit 'add-playlist',
-        msg: message
-        query: action.query
-        robot: robot
+  ###
+  # @name robot commands
+  # @desc these are the commands robot will answer to
+  ###
+  robot.respond regx, (msg) ->
+    console.log 'user:', msg.user
+    console.log 'message:', msg.message
+    console.log 'commands:', msg.match
 
     switch msg.match[1]
-      when 'playlist'
-        playlist {
-          exec: msg.match[2]
-          query: msg.match[3]
-          keyword: msg.match[1]
-        }, msg, robot
+      when 'help'
+
       when 'search'
-        search {
-          exec: msg.match[2]
-          query: msg.match[3]
-          keyword: msg.match[1]
-        }, msg, robot
-      else
-        msg.reply "I'am up and running but I don't know what you would like to listen to."
+        msg.reply 'Search Spotify'

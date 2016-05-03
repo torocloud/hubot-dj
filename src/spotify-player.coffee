@@ -7,7 +7,7 @@
 #
 
 {join} = require 'path'
-script = "#{join __dirname, '/../scripts/spotify.scpt'}"
+script = "#{join process.cwd(), 'node_modules/hubot-dj/scripts/spotify.scpt'}"
 
 rq = require 'request'
 sh = require 'sh'
