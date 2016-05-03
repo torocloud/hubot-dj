@@ -1,3 +1,16 @@
+# Description:
+#   Disc Jock bot that lets you queue your requested songs from Spotify
+#
+# Dependencies:
+#
+#
+# Configuration:
+#   export SPOTIFY_USER_ID=${YOUR_SPOTIFY_USER_ID}
+#   export SPOTIFY_CLIENT_ID=${YOUR_SPOTIFY_CLIENT_ID}
+#   export SPOTIFY_CLIENT_SECRET=${YOUR_SPOTIFY_CLIENT_SECRET}
+#   export SPOTIFY_PLAYLIST_ID=${YOUR_SPOTIFY_PLAYLIST_ID}
+#
+
 {join} = require 'path'
 events = require 'events'
 
@@ -38,6 +51,8 @@ module.exports = (robot) ->
     "Is anybody up? Let's brew some coffee.",
     "I'm built with CoffeeScript and Shell, I'm made for parties.",
     "You do know I don't like Justin Bieber right? Just so we're clear."
+    "Holy shit! It's nice to wake up from a shitty slumber.",
+    "I'm rising from the murks of the sultry abyss. Let's get this show started."
   ]
 
   # Hubot Night Mode
